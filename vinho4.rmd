@@ -1,0 +1,646 @@
+---
+title: "Wine research"
+author: "Alexander Andreev"
+date: "17 April 2018"
+output:
+  html_notebook: default
+  html_document: default
+---
+
+
+Let's read the data first and show datatypes and basic statistics.
+
+```{r inits, message=FALSE}
+
+library(gridExtra)
+#library(psych)
+library(moments)
+library(pastecs)
+library(sm)
+library(RColorBrewer)
+library(vioplot)
+library(ggplot2)
+#library(caret)
+library(rcompanion)
+
+```
+
+
+```{r data_statistics, message=FALSE}
+
+set.seed(22)
+theme_update(plot.title = element_text(hjust = 0.5))
+path <- 'c:/Users/fyva/workspace/Udacity/Wine/'
+setwd(path)
+vinho_set <- read.csv('wineQualityReds.csv')
+str(vinho_set)
+cat('\n')
+summary(vinho_set[,c(2:7)])
+cat('\n')
+summary(vinho_set[,c(8:13)])
+vinho_set$fquality <- factor(vinho_set$quality, ordered = TRUE)
+
+```
+
+Let's check missing data in the dataset: it is exactly `r sum(is.na(vinho_set))` entries overall.
+```{r}
+#sum(is.na(vinho_set))
+#data.frame(sapply(vinho_set, function(x) sum(is.na(x))))
+```
+
+### Univariate Plots Section
+
+Let's take a look at the diagrams of the distribution of variables
+
+```{r histogram_f2, fig.height=4, fig.width=8, message=FALSE } 
+
+drow_distrib <- function(df, pred, hist_bins){
+  pp <- list() 
+  pp[[1]] <- ggplot(df, aes_string(x=factor(''), y=pred))+ geom_violin( fill='cyan')+
+    geom_boxplot(outlier.colour = 'red', alpha=0.3, color="black", width=.1) + 
+    xlab(paste(pred, ', ', length(boxplot.stats(df[[pred]])$out), 
+               ifelse(length(boxplot.stats(df[[pred]])$out)==1, 'outlier', 'outliers')))
+  
+  pp[[2]] <- ggplot(df, aes_string(x=pred)) + geom_histogram(bins=hist_bins, colour="black", fill="cyan") +
+    xlab(paste(pred, ', skewness =', round(skewness(df[pred]),3)))
+  
+  grid.arrange(pp[[1]], pp[[2]], ncol=2)
+}
+
+drow_distrib(vinho_set, 'fixed.acidity', 20)
+
+```
+Varable fixed.acidity has right skewed distribution and has 49 outliers (points in red). 
+Outliers can not be removed on the basis of single field data only. With a large number of outliers and the impossibility of manual testing, the use of the multivariate verification procedure is necessary, e.g. Mahalanobis distance.
+
+
+```{r histogram_f3, fig.height=4, fig.width=8, message=FALSE}
+drow_distrib(vinho_set, 'volatile.acidity', 20)
+```
+Variable volatile.acidity is also right skewed and has 19 outliers.
+
+
+```{r histogram_f4, fig.height=4, fig.width=8, message=FALSE}
+drow_distrib(vinho_set, 'citric.acid', 20)
+```
+Variable citric.acid is also right skewed and has 1 outlier only.
+
+
+```{r histogram_f5, fig.height=4, fig.width=8, message=FALSE}
+drow_distrib(vinho_set, 'residual.sugar', 15)
+```
+Variable residual.sugar is extremly skewed and has 155 outliers. Most values are located in the region of 2 g/l
+
+
+```{r histogram_f6, fig.height=4, fig.width=8, message=FALSE}
+drow_distrib(vinho_set, 'chlorides', 29)
+```
+Variable chlorides is also extremly skewed and has 112 outliers. Most values are located in the region of 0.08 g/l
+
+```{r histogram_f7, fig.height=4, fig.width=8, message=FALSE}
+drow_distrib(vinho_set, 'free.sulfur.dioxide', 20)
+```
+Variable free.sulfur.dioxide is right skewed and has 30 outliers.
+
+```{r histogram_f8, fig.height=4, fig.width=8, message=FALSE}
+drow_distrib(vinho_set, 'total.sulfur.dioxide', 20)
+```
+Variable total.sulfur.dioxide is also right skewed and has 55 outliers.
+
+```{r histogram_f9, fig.height=4, fig.width=8, message=FALSE}
+drow_distrib(vinho_set, 'density', 20)
+```
+Variable density has normal distribution and has 45 outliers.
+
+
+```{r histogram_f10, fig.height=4, fig.width=8, message=FALSE}
+drow_distrib(vinho_set, 'pH', 20)
+```
+Variable pH has normal distribution and has 35 outliers.
+
+
+```{r histogram_f11, fig.height=4, fig.width=8, message=FALSE}
+drow_distrib(vinho_set, 'sulphates', 20)
+```
+Varable sulphates has right skewed distribution and has 59 outliers
+
+```{r histogram_f12, fig.height=4, fig.width=8, message=FALSE}
+drow_distrib(vinho_set, 'alcohol', 20)
+```
+Varable alcohol has right skewed distribution and has 13 outliers
+
+```{r}
+pred <- 'quality'
+ggplot(vinho_set, aes_string(x=pred)) + geom_histogram(bins=6, colour="black", fill="cyan") +
+    scale_x_continuous(breaks = seq(3,8)) +
+    xlab(pred)
+```
+Target variable.
+Tukey?s fences method considers the first and last classes of the target variable as outliers.
+
+
+
+One predictor citric.acid has `r sum(vinho_set$citric.acid==0)` entries with zero values. Let's check the distributions of these observations:
+```{r null.citric.acid, fig.height=12, fig.width=8, message=FALSE}
+#sum(vinho_set$citric.acid==0)
+
+p <- ggplot(vinho_set[vinho_set$citric.acid==0,]) + geom_histogram(colour="black", fill="white")
+pp <- list()    
+for(nn in names(vinho_set[,!names(vinho_set) %in% c('id','citric.acid','quality')])) {
+  pp[[nn]] <- p + aes_string(x=nn) 
+}
+pp[[nn]] <- p + aes_string(x='quality') + geom_histogram(colour="black", fill="white", bins=5)
+do.call(grid.arrange,c(pp, ncol=2, nrow=6))
+
+```
+There is no significant difference with the rest. The best wines should contain citric acid.
+
+Let's check the variance:
+```{r message=FALSE}
+
+options(scipen=100)
+options(digits=2)
+x <- stat.desc(vinho_set, basic = FALSE)
+x$predictors <- rownames(x)
+#rownames(x) <- NULL
+print(t(x[5, c(2:12)]))
+
+
+```
+
+Two predictors chlorides and density have small variance.
+Let's check these two variables with  nearZeroVar method for the possibility of removing them:
+```{r}
+x = nearZeroVar(vinho_set[,c('chlorides','density')], saveMetrics = TRUE)
+x$predictors <- rownames(x)
+rownames(x) <- NULL
+print(x[, c(5, 1:4)])
+
+
+```
+
+Analysis shows that no variable can be excluded by this method.
+
+
+
+### Univariate Analysis
+The Dataset is well organized and cleaned. 
+To calculate statistics that require a normal distribution, two predictors free.sulfur.dioxide	and total.sulfur.dioxide can be normalized by the logarithmic transformation. To normalize other skewed variables, you need a more accurate fit, for example, using the the Tukey ladder of powers.
+132 vines or 8% have zero content of citric acid.
+The target variable is uneven distributed. A small amount of data by classes 3 and 8 will decrease the significance of any assumption or prediction.
+Outliers in data can distort predictions and affect the accuracy of a model.
+
+
+
+### Bivariate Plots Section
+
+Full matrix shows Pearson correlation, histograms and bivariate scatterplots.
+Linear regression is also shown. 
+```{r fig.height=8}
+options(digits=2)
+pairs.panels(vinho_set[,2:13], gap=0, lm=TRUE, ellipses=FALSE)
+#,jiggle=TRUE, pch=21, bg=c('red','orange','yellow','green','blue','purple')[vinho_set$quality])
+
+```
+
+Before analyzing the pairs of properties, let's consider the distribution density by quality. This plot series reflects the last column of the correlation matrix.
+
+```{r}
+ggplot(vinho_set) +
+  aes(fixed.acidity, fill = fquality, colour = fquality) +
+  geom_density(alpha = 0.1) + #xlim(7, 16) +
+  xlab('fixed.acidity, g/l') +
+  ggtitle("Fixed acidity distribution by quality")
+
+```
+Wine classes are equally distributed throughout the range. Classes 7 and 8 have a slightly wider bell distribution. The others have a maximum about 7 g/l of tartaric acid.
+
+
+```{r}
+ggplot(vinho_set) +
+  aes(volatile.acidity, fill = fquality, colour = fquality) +
+  geom_density(alpha = 0.1) + xlim(0, 1.7) +
+  xlab('volatile.acidity, g/l') +
+  ggtitle("Volatile acidity distribution by quality")
+
+```
+It is obvious that wine class falls with growing of volatile acidity or acetic acid concentration. Here we can definitely talk about the cause-effect relationship.
+
+
+```{r}
+ggplot(vinho_set) +
+  aes(citric.acid, fill = fquality, colour = fquality) +
+  geom_density(alpha = 0.1) + #xlim(7, 16) +
+  xlab('citric.acid, g/l') +
+  ggtitle("Citric acid distribution by quality")
+
+```
+Citric acid is in opposite a good acid but a cause-effect or correlation is smaller.
+
+
+```{r}
+ggplot(vinho_set[vinho_set$fquality %in% c(3:8),]) +
+  aes(residual.sugar, fill = fquality, colour = fquality) +
+  geom_density(alpha = 0.1) + #xlim(7, 16) +
+  xlab('residual.sugar, g/l') +
+  ggtitle("Residual sugar distribution by quality")
+
+```
+The sugar content does not reflect the quality of the wine at all.
+
+
+```{r}
+ggplot(vinho_set[vinho_set$fquality %in% c(3:8),]) +
+  aes(chlorides, fill = fquality, colour = fquality) +
+  geom_density(alpha = 0.1) + 
+  xlab('chlorides, g/l') +
+  ggtitle("Chlorides distribution by quality")
+
+```
+The tail of the distribution of low-quality wine is clearly visible. Wine classes are like-distributed in spite of long tail of outliers.
+
+
+```{r}
+ggplot(vinho_set) +
+  aes(free.sulfur.dioxide, fill = fquality, colour = fquality) +
+  geom_density(alpha = 0.1) +
+  xlab('free.sulfur.dioxide, mg/l') +
+  ggtitle("Free sulfur dioxide distribution by quality")
+
+```
+Wine classes are equally distributed throughout the range.
+
+
+```{r}
+ggplot(vinho_set) +
+  aes(total.sulfur.dioxide, fill = fquality, colour = fquality) +
+  geom_density(alpha = 0.1) +
+  xlab('total.sulfur.dioxide, mg/l') +
+  ggtitle("Total sulfur dioxide distribution by quality")
+
+```
+Wine classes are equally distributed throughout the range.
+
+```{r}
+ggplot(vinho_set) +
+  aes(density, fill = fquality, colour = fquality) +
+  geom_density(alpha = 0.1) +
+  xlab('density, g/ml') +
+  ggtitle("Density distribution by quality")
+
+```
+Both boundary classes 3 and 8 are slightly distinguished from the rest. Density is a derived feature gathered other features with opposite effect.
+
+```{r}
+ggplot(vinho_set) +
+  aes(pH, fill = fquality, colour = fquality) +
+  geom_density(alpha = 0.1) +
+  xlab('pH') +
+  ggtitle("pH distribution by quality")
+
+```
+Both boundary classes 3 and 8 are slightly distinguished again. pH is a derived feature too. This property reflects the aggregated acidity of the aqueous solution.
+
+
+```{r}
+ggplot(vinho_set) +
+  aes(sulphates, fill = fquality, colour = fquality) +
+  geom_density(alpha = 0.1) +
+  xlab('sulphates, g/l') +
+  ggtitle("Sulphates distribution by quality")
+
+```
+Sulphates are unevenly distributed without a linear dependence.
+
+
+```{r}
+ggplot(vinho_set) +
+  aes(alcohol, fill = fquality, colour = fquality) +
+  geom_density(alpha = 0.1) + xlim(7.5, 15.5) +
+  xlab('Alcohol, %') +
+  ggtitle("Alcohol distribution by quality")
+
+```
+Alcohol distribution has a direct and strongest impact on quality.
+
+
+It does not make sense to consider all possible combinations of pairs of properties, especially if the correlation coefficient is less than 0.3. Consider pairs of properties that determine the physical parameters of a solution as well as taking into account the effect on the target variable from the previous series of graphs
+
+
+Lets look at some individual pairs.
+
+Acids distribution:
+```{r fig.height=4, fig.width=12} 
+par(mfrow = c(1, 2))
+
+p1 <- ggplot(aes(x=fixed.acidity, y=pH), data=vinho_set) + 
+  geom_point(alpha = 0.8, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  xlab('fixed.acidity (tartaric acid), g/l')
+
+p2 <- ggplot(aes(x=citric.acid, y=pH), data=vinho_set) + 
+  geom_point(alpha = 0.8, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  xlab('citric acid, g/l') 
+
+p3 <- ggplot(aes(x=volatile.acidity, y=pH), data=vinho_set) + 
+  geom_point(alpha = 0.8, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  xlab('volatile.acidity (acetic acid), g/l')
+
+grid.arrange(p1, p2, p3, ncol=3)
+
+
+```
+The correlation in the first two pairs are obvious - the pH specifies the acidity of an aqueous solution.
+Acetic acid is formed inversely proportional to the content of the previous two acids as indicated above in the matrix. 
+A concentration increase of acetic acid leads to an excessive content reduction of both other acids, a decrease in the total acidity and a deterioration in the quality of the wine.
+
+
+
+```{r}
+ggplot(aes(x=volatile.acidity+citric.acid+fixed.acidity, y=pH), data=vinho_set) + #
+  geom_point(alpha = 0.8, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  xlab('aggregated acid, g/l')
+
+```
+The tartaric acid predominates by mass and sets the trend.
+
+```{r}
+ggplot(aes(x=citric.acid, y=volatile.acidity), data=vinho_set) + #
+  geom_point(alpha = 0.8, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  xlab('citric acid, g/l') +
+  ylab('volatile.acidity (acetic acid), g/l')
+
+```
+The formation of acetic acid decreases with increasing content of citric acid.
+
+
+The correlation in the next four pairs are obvious too - The graph shows how different concentrations of substances affect the density of the solution.
+```{r fig.height=8, fig.width=8}
+p1 <- ggplot(aes(x=fixed.acidity, y=density), data=vinho_set) + 
+  geom_point(alpha = 0.4, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  xlab('fixed.acidity, g/l')
+
+p2 <- ggplot(aes(x=citric.acid, y=density), data=vinho_set) + 
+  geom_point(alpha = 0.4, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  xlab('citric.acid, g/l')
+
+p3 <- ggplot(aes(x=residual.sugar, y=density), data=vinho_set ) + 
+  geom_point(aes(colour = vinho_set$residual.sugar<3.68), alpha = 0.2, size = 1, show.legend=FALSE) +
+  geom_smooth(method = "lm", se = FALSE, size=1, color='red') +
+  geom_smooth(method = "lm", se = FALSE, size=1, data=vinho_set[vinho_set$residual.sugar<3.68,], color='blue') +
+  scale_color_manual(values=c("red", "black")) +
+  xlab('residual.sugar, g/l')
+
+p4 <- ggplot(aes(x=alcohol, y=density), data=vinho_set) + 
+  geom_point(alpha = 0.4, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  xlab('alcohol, % by volume')
+
+grid.arrange(p1, p2, p3, p4, ncol=2) #, nrow=2
+
+```
+Acids and sugar increase the density of the solution, and alcohol reduces it. 
+The predictor residual.sugar has extremely many outliers relative to the rest. Two regression lines show the impact of the outliers (red points).
+The clear water has a density of 1.0 g/ml.
+
+### Bivariate Analysis
+The density distribution of a variable with a low correlation merges into one line and vice versa, a correlation above 0.3 gives a divergence between the density distribution of wines of different qualities.
+
+The second part with scatterplots reflects the physico-chemical properties of the aqueous solution. The study shows the expected correlation of the variables. The dependence of physical properties can help in interpreting the distribution of a qualitative variable.
+
+
+
+
+### Multivariate Plots Section
+
+Lets look at next plots of three variables
+```{r}
+ggplot(aes(x=citric.acid, y=volatile.acidity, colour = fquality), data=vinho_set) + #
+  geom_point(alpha = 0.9, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  scale_color_brewer(type='seq') +
+  xlab('citric acid, g/l') +
+  ylab('volatile.acidity, g/l') +
+  theme(panel.background = element_rect(fill = "grey80"))
+
+```
+The change in the slope of the lines corresponds to the redistribution of the proportion of acids, depending on the class
+
+```{r}
+ggplot(aes(x=alcohol, y=volatile.acidity, colour = fquality), data=vinho_set) + #
+  geom_point(alpha = 0.8, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  scale_color_brewer(type='seq') +
+  ylab('volatile.acidity, g/l') +
+  xlab('alcohol, %') +
+  labs(colour = 'Quality') +
+  theme(panel.background = element_rect(fill = "grey80"))
+
+```
+Dependence is visible only among wines of classes 3 and 8. 
+On the graph you can see the color gradient in the direction from the left-top to the right-down.
+
+```{r fig.height=5, fig.width=9}
+
+p1 <- ggplot(aes(x=chlorides, y=sulphates, colour = fquality), 
+       data=vinho_set) + 
+  geom_point(alpha = 0.8, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  scale_color_brewer(type='seq') +
+  labs(colour = 'Quality') +
+  ggtitle(paste('Sulphates of Chlorides and Quality\nCorrelation ', 
+                round(cor(vinho_set$chlorides, vinho_set$sulphates),2))) +
+  theme(panel.background = element_rect(fill = "grey80"))
+
+mask <- (vinho_set$chlorides<0.14)&(vinho_set$sulphates<1)
+
+p2 <- ggplot(aes(x=chlorides, y=sulphates, colour = fquality), 
+       data=vinho_set[mask,]) + 
+  geom_point(alpha = 0.8, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  scale_color_brewer(type='seq') +
+  labs(colour = 'Quality') +
+  ggtitle(paste('Sulphates of Chlorides and Quality\nCorrelation ', 
+                round(cor(vinho_set[mask,]$chlorides, vinho_set[mask,]$sulphates),2))) +
+  theme(panel.background = element_rect(fill = "grey80"))
+
+grid.arrange(p1, p2, ncol=2)
+```
+By discarding the outliers only (on the right plot) we can see the inverse relationship in classes 3 and 8 and the change in the nature of the total correlation from positive to zero.
+
+```{r fig.height=5, fig.width=10}
+p1 <- ggplot(vinho_set[(vinho_set$chlorides > 0.02),], 
+        aes(x=chlorides, 
+            y=sulphates, colour = fquality)) + 
+        geom_point(alpha = 0.8, size = 1) +
+        ylab('sulphates, mg/Liter') +
+        xlab('chlorides, g/l') +
+        geom_smooth(method = "lm", se = FALSE, size=1) +
+        ggtitle('Sulphates of Chlorides\nand Quality') +
+        scale_color_brewer(type='seq') +
+        labs(colour = 'Quality') +
+        theme(panel.background = element_rect(fill = "grey80"))
+
+p2 <- ggplot(vinho_set[(vinho_set$chlorides > 0.02),], 
+        aes(x=-1/(chlorides^0.38), 
+            y=-1/(sulphates^1.1), colour = fquality)) + 
+        geom_point(alpha = 0.8, size = 1) +
+        ylab('sulphates,  Tukey-transformed with lambda -1.1') +
+        xlab('chlorides,  Tukey-transformed with lambda -0.38') +
+        geom_smooth(method = "lm", se = FALSE, size=1) +
+        ggtitle('Sulphates Tukey-transformed of\nChlorides Tukey-transformed and Quality') +
+        scale_color_brewer(type='seq') +
+        labs(colour = 'Quality') +
+        theme(panel.background = element_rect(fill = "grey80"))
+grid.arrange(p1, p2, ncol=2)
+
+```
+Normalization on both axes does not change the relationship. There is no clear clusters, but a small gradient along axis y.
+
+
+```{r fig.height=5, fig.width=10}
+p1 <- ggplot(vinho_set[(vinho_set$chlorides > 0.02)&(vinho_set$total.sulfur.dioxide<250),], 
+        aes(x=chlorides, 
+            y=total.sulfur.dioxide, colour = fquality)) + 
+        geom_point(alpha = 0.8, size = 1) +
+        ylab('total sulfur dioxide, mg/Liter') +
+        xlab('chlorides, g/l') +
+        geom_smooth(method = "lm", se = FALSE, size=1) +
+        ggtitle('Total Sulfur Dioxide of Chlorides\nand Quality') +
+        scale_color_brewer(type='seq') +
+        labs(colour = 'Quality') +
+        theme(panel.background = element_rect(fill = "grey80"))
+p2 <- ggplot(vinho_set[(vinho_set$chlorides > 0.02)&(vinho_set$total.sulfur.dioxide<250),], 
+        aes(x=-1/(chlorides^0.38), 
+            y=total.sulfur.dioxide^0.05, colour = fquality)) + 
+        geom_point(alpha = 0.8, size = 1) +
+        ylab('total sulfur dioxide,  Tukey-transformed with lambda 0.05') +
+        xlab('chlorides,  Tukey-transformed with lambda -0.38') +
+        geom_smooth(method = "lm", se = FALSE, size=1) +
+        ggtitle('Total Sulfur Dioxide Tukey-transformed of\nChlorides Tukey-transformed and Quality') +
+        scale_color_brewer(type='seq') +
+        labs(colour = 'Quality') +
+        theme(panel.background = element_rect(fill = "grey80"))
+grid.arrange(p1, p2, ncol=2)
+
+```
+Normalization on both axes does not change the relationship. There is no clear gradient in any direction.
+A small correlation of variables is noticeable on these graphs. There is no clear clusters, but a small gradient along axis y.
+
+
+### Multivariate Analysis
+
+
+Let's investigate the behavior of the linear model using the information presented above.
+First, a model without of any predictors changes is shown:
+
+```{r lm_basic}
+options(digits=3)
+nn1 <- paste(names(vinho_set[,c(2:12)]), collapse = '+')
+ff <- as.formula(paste("quality ~", nn1))
+lm1 <- lm(formula = ff, data = vinho_set)
+summary(lm1)
+```
+The greatest error is observed by the variable density, the removal of this variable slightly improves the F-statistic.
+Removing the others three variables (fixed.acidity, citric.acid, residual.sugar) with the probability greater than 5% in the column Pr(>|t|) improves F-statistic while maintaining the accuracy:
+```{r lm_basic2}
+nn1 <- paste(names(vinho_set[,c(3,6:8,10:12)]), collapse = '+')
+ff <- as.formula(paste("quality ~", nn1))
+lm1 <- lm(formula = ff, data = vinho_set)
+summary(lm1)
+```
+
+Let's compare it with normalized distribution. The Tukey ladder of powers is used:
+
+```{r  lm_std1, echo=FALSE, message=FALSE, warning=FALSE}
+nn2 <- paste(paste('transformTukey(',names(vinho_set[,c(2:12)]), ',plotit=FALSE)'), collapse = '+') #4,
+ff <- as.formula(paste("quality ~", nn2))
+log <- capture.output({
+  lm2 <- lm(formula = ff, data = vinho_set)
+})
+summary(lm2)
+```
+Two predictors pH and free.sulfur.dioxide have the probability greater than 5% in the column Pr(>|t|) and can be removed from the consideration. The transformed predictor alcohol has received the worst value in the column Std. Error. The original unchanged value is preferably.
+
+```{r  lm_std2, echo=FALSE, message=FALSE, warning=FALSE}
+nn2 <- paste('alcohol+', paste('transformTukey(',names(vinho_set[,c(2:6,8,9,11)]), ',plotit=FALSE)'), collapse = '+') #4,
+ff <- as.formula(paste("quality ~", nn2))
+log <- capture.output({
+  lm2 <- lm(formula = ff, data = vinho_set)
+})
+summary(lm2)
+```
+In comparison with the original version it was possible to increase the accuracy of the approximation by 4%, improve F-statistic, reduce the complexity of the model by removing of two predictors.
+
+As a next step, it would be possible to delete observations with outliers. The methods based on z-score or z-score with MAD can be used for the normal distributed predictors or a Tukey?s fences can be used for the skewed predictors.
+
+
+The linear model is highly sensitive to the characteristics of individual variables and very poorly approximates the distribution of the real wine data. 
+
+The svm-based model mentioned in the [original study](http://dx.doi.org/10.1016/j.dss.2009.05.016) is not sensitive to the distribution kind of variables and gives the worst predictions by any transformation (compared with centred-scaled, PCA, ICA and Box-Cox transformation).
+Only repeated K?fold cross?validation is used. The final parameters used for the model were sigma = 0.0784541 and C = 2.
+
+The full connected neural network with three hidden layers (15, 11 and 8 neurons accordingly) gives slightly better predictions and also does not require any transformations. The logistic activation function is used. Removing data of classes 3 and 8 givs an improvement in prediction.
+
+## Final Plots and Summary
+
+
+### Plot 1
+```{r fin_plot_1}
+#palette(brewer.pal(n = 8, name = "Paired"))
+
+#par(lwd=2)
+#sm.density.compare(vinho_set$alcohol, vinho_set$fquality, xlab='Alcohol, %')
+#title(main="Alcohol distribution by quality")
+#legend("topright", legend=levels(vinho_set$fquality), fill=1+(1:nlevels(vinho_set$fquality)), title='Quality')
+
+ggplot(vinho_set) +
+  aes(alcohol, fill = fquality, colour = fquality) +
+  geom_density(alpha = 0.1) + xlim(7, 16) +
+  xlab('Alcohol, %') +
+  ggtitle("Alcohol distribution by quality")
+
+```
+
+This distribution shows the most important feature of the dataset. The predictor alcohol has the relative importance of 33% in the linear model with normalized variables. The means of class distributions are arranged in ascending order.
+It should be taken into account that classes 3 and 8 make up only 1.8% of the total.
+
+### Plot 2
+```{r fin_plot_2}
+
+ggplot(data=vinho_set, stat="count", aes_string(x='fquality')) + 
+  geom_bar() + 
+  xlab('quality, score') +
+  ggtitle('Wine distribution by class')
+  
+  #geom_histogram(colour="black", fill="white")
+
+```
+This graph shows an extremely uneven data distribution by the target variable quality. Tukey?s fences method considers the first and last classes of the variable as outliers. Removing data of classes 3 and 8 (10 and 18 observations) givs an improvement in prediction of the full connected neural network.
+
+### Plot 3
+```{r fin_plot_3}
+ggplot(aes(x=citric.acid, y=volatile.acidity, colour = fquality), data=vinho_set) + #
+  geom_point(alpha = 0.9, size = 1) +
+  geom_smooth(method = "lm", se = FALSE, size=1) +
+  scale_color_brewer(type='seq') +
+  xlab('citric acid, g/l') +
+  ylab('volatile.acidity, g/l') +
+  theme(panel.background = element_rect(fill = "grey80")) +
+  ggtitle('Volatile.acidity (acetic acid) of citric acid')
+
+
+```
+
+This graph shows the second most important variable with the relative importance of 20% in the linear model with normalized variables, this time having a negative impact on the target variable. Its antipode is on the axis x. Citric acid is weakly bound to the target variable and has relative importance 5% only, but apparently has a direct effect on the occurrence of the "bad" acetic acid. With a deficiency of citric acid there is a partial compensation of the total acidity with the acetic acid produced during fermentation. 
+
+## Reflection
+
+As far as I know this is the first dataset of considerable volume dedicated to the winemaking. There are no missing values in the data, but there are outliers, by the nature of which I can not speak of an error. The most difficult for me was the subjective nature of the wine classification, which led to the absence of noticeable clusters and a large error of linear regression.
+On the other hand, I was sure that the model on the neural network gives a prediction near or better than other nonlinear models and found such a configuration. In the process of optimization I found out that linear and nonlinear regression as well as neural network have completely different sensitivity to outliers, skewness and various data conversions.
